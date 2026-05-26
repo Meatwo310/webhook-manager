@@ -1,4 +1,5 @@
 import type { CreateHookInput, Hook, HookRow, UpdateHookInput } from './types';
+import { generatePathToken } from '../security';
 
 const selectHookColumns = `
 	id,
@@ -32,7 +33,7 @@ export async function createHook(db: D1Database, input: CreateHookInput): Promis
 		id: crypto.randomUUID(),
 		name: input.name,
 		kind: input.kind ?? 'statuspage',
-		pathToken: input.pathToken,
+		pathToken: input.pathToken ?? generatePathToken(),
 		destinationId: input.destinationId,
 		configJson: input.configJson ?? '{}',
 		isActive: input.isActive ?? true,

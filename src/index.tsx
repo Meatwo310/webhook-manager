@@ -42,6 +42,7 @@ import {
 import { buildStatuspageDiscordPayload } from './hooks'
 import { jsonError, parseBooleanFlag, type AppBindings } from './http'
 import { renderer } from './renderer'
+import { PATH_TOKEN_PATTERN } from './security'
 import { runRssTimers } from './timers'
 
 const app = new Hono<AppBindings>();
@@ -171,7 +172,7 @@ function AdminPage() {
           </label>
           <label class="wide token-row">
             <span>Path token</span>
-            <input name="pathToken" autocomplete="off" required />
+            <input name="pathToken" autocomplete="off" />
             <button type="button" class="icon-button" data-action="generate-token" title="Generate token" aria-label="Generate token">
               ✦
             </button>
@@ -801,12 +802,8 @@ function parseHookInput(
     return { ok: false, message: 'Only statuspage hooks are supported for now.' }
   }
 
-  if (requireFields && !pathToken) {
-    return { ok: false, message: 'pathToken is required.' }
-  }
-
-  if (pathToken && !/^[A-Za-z0-9_-]{16,}$/.test(pathToken)) {
-    return { ok: false, message: 'pathToken must be at least 16 URL-safe characters.' }
+  if (pathToken && !PATH_TOKEN_PATTERN.test(pathToken)) {
+    return { ok: false, message: 'pathToken must be at least 43 URL-safe characters.' }
   }
 
   if (requireFields && !destinationId) {

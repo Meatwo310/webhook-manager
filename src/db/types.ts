@@ -71,7 +71,7 @@ export type HookRow = {
 export type CreateHookInput = {
 	name: string;
 	kind?: string;
-	pathToken: string;
+	pathToken?: string;
 	destinationId: string;
 	configJson?: string;
 	isActive?: boolean;
