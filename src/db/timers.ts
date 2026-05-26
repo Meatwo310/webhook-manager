@@ -207,3 +207,27 @@ export async function updateTimerLastRunAt(
 
 	return row ? toTimer(row) : null;
 }
+
+export type DeleteTimerResult = { ok: true } | { ok: false; reason: 'not_found' | 'active' };
+
+export async function deleteInactiveTimer(db: D1Database, id: string): Promise<DeleteTimerResult> {
+	const timer = await getTimer(db, id);
+
+	if (!timer) {
+		return { ok: false, reason: 'not_found' };
+	}
+
+	if (timer.isActive) {
+		return { ok: false, reason: 'active' };
+	}
+
+	await db
+		.prepare('DELETE FROM rss_items WHERE feed_id IN (SELECT id FROM rss_feeds WHERE timer_id = ?)')
+		.bind(id)
+		.run();
+	await db.prepare('DELETE FROM rss_feeds WHERE timer_id = ?').bind(id).run();
+	await db.prepare("DELETE FROM deliveries WHERE source_type = 'timer' AND source_id = ?").bind(id).run();
+	const result = await db.prepare('DELETE FROM timers WHERE id = ?').bind(id).run();
+
+	return result.meta.changes > 0 ? { ok: true } : { ok: false, reason: 'not_found' };
+}

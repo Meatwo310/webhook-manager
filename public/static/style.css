@@ -289,6 +289,7 @@ input[type="checkbox"] {
 }
 
 .primary-button,
+.secondary-button,
 .icon-button {
   border: 1px solid transparent;
   border-radius: 4px;
@@ -304,6 +305,18 @@ input[type="checkbox"] {
 
 .primary-button:hover {
   background: var(--accent-strong);
+}
+
+.secondary-button {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+  padding: 0 14px;
+  font-weight: 700;
+}
+
+.secondary-button:hover {
+  background: var(--surface-soft);
 }
 
 .icon-button {
@@ -398,6 +411,31 @@ code {
   word-break: break-word;
 }
 
+.edit-dialog {
+  width: min(760px, calc(100% - 32px));
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0;
+}
+
+.edit-dialog::backdrop {
+  background: rgb(0 0 0 / 48%);
+}
+
+.edit-card {
+  padding: 18px;
+}
+
+.dialog-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
+.dialog-actions {
+  justify-content: flex-end;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     padding: 16px;
@@ -435,5 +473,9 @@ code {
 
   .wide {
     grid-column: span 1;
+  }
+
+  .dialog-grid {
+    grid-template-columns: 1fr;
   }
 }

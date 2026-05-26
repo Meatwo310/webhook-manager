@@ -8,6 +8,8 @@ export type ApiErrorCode =
   | 'bad_request'
   | 'not_found'
   | 'inactive'
+  | 'active_entry'
+  | 'referenced'
   | 'unsupported_kind'
   | 'delivery_failed'
 

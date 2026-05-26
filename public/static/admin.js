@@ -34,6 +34,8 @@ function bindActions() {
   $('[data-action="refresh"]')?.addEventListener('click', () => void refreshAll());
   $('[data-action="run-rss"]')?.addEventListener('click', () => void runRss());
   $('[data-action="refresh-deliveries"]')?.addEventListener('click', () => void refreshDeliveries());
+  $('[data-action="close-edit"]')?.addEventListener('click', () => closeEditDialog());
+  $('[data-action="cancel-edit"]')?.addEventListener('click', () => closeEditDialog());
   $('[data-action="generate-token"]')?.addEventListener('click', () => {
     const input = $('[data-form="hook"] [name="pathToken"]');
     input.value = generateToken();
@@ -67,6 +69,10 @@ function bindForms() {
   $('[data-form="feed"]')?.addEventListener('submit', (event) => {
     event.preventDefault();
     void withUiErrors(() => createFeed(event.currentTarget));
+  });
+  $('[data-form="edit"]')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void withUiErrors(() => saveEdit(event.currentTarget));
   });
 }
 
@@ -191,23 +197,30 @@ async function createFeed(form) {
 async function handleRowAction(button) {
   const { rowAction, id } = button.dataset;
 
+  if (rowAction?.startsWith('edit-')) {
+    openEditDialog(rowAction.replace('edit-', ''), id);
+    return;
+  }
+
   if (rowAction === 'test-destination') {
     await api(`/api/destinations/${id}/test`, { method: 'POST' });
     setStatus('Test message sent.');
     return;
   }
 
-  const paths = {
+  const disableTargets = {
     'disable-destination': `/api/destinations/${id}`,
     'disable-hook': `/api/hooks/${id}`,
     'disable-timer': `/api/timers/${id}`,
-    'delete-feed': `/api/rss-feeds/${id}`,
   };
 
-  if (paths[rowAction]) {
-    await api(paths[rowAction], { method: 'DELETE' });
+  if (disableTargets[rowAction]) {
+    await api(disableTargets[rowAction], {
+      method: 'PATCH',
+      body: { isActive: false },
+    });
     await refreshAll();
-    setStatus(rowAction === 'delete-feed' ? 'Feed deleted.' : 'Disabled.');
+    setStatus('Disabled.');
     return;
   }
 
@@ -224,7 +237,140 @@ async function handleRowAction(button) {
     });
     await refreshAll();
     setStatus('Re-enabled.');
+    return;
   }
+
+  const deleteTargets = {
+    'delete-destination': `/api/destinations/${id}`,
+    'delete-hook': `/api/hooks/${id}`,
+    'delete-timer': `/api/timers/${id}`,
+    'delete-feed': `/api/rss-feeds/${id}`,
+  };
+
+  if (deleteTargets[rowAction]) {
+    if (!confirm('Delete this entry permanently?')) {
+      return;
+    }
+    await api(deleteTargets[rowAction], { method: 'DELETE' });
+    await refreshAll();
+    setStatus('Deleted.');
+  }
+}
+
+function openEditDialog(type, id) {
+  const dialog = $('[data-edit-dialog]');
+  const form = $('[data-form="edit"]');
+  const fields = $('[data-edit-fields]');
+  const title = $('[data-edit-title]');
+  const item = findEditable(type, id);
+
+  if (!dialog || !form || !fields || !title || !item) {
+    setStatus('Editable entry was not found.', true);
+    return;
+  }
+
+  form.reset();
+  form.elements.type.value = type;
+  form.elements.id.value = id;
+  title.textContent = `Edit ${editTypeLabel(type)}`;
+  fields.innerHTML = editFieldsHtml(type, item);
+  renderEditDestinationOptions(fields, item.destinationId);
+
+  if (type === 'timer') {
+    const config = timerConfig(item);
+    form.elements.maxItems.value = String(config.max_items_per_run ?? 5);
+    form.elements.postOnFirstRun.checked = Boolean(config.post_on_first_run);
+  }
+
+  if (typeof dialog.showModal === 'function') {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute('open', '');
+  }
+}
+
+function closeEditDialog() {
+  const dialog = $('[data-edit-dialog]');
+  if (!dialog) {
+    return;
+  }
+
+  if (typeof dialog.close === 'function') {
+    dialog.close();
+  } else {
+    dialog.removeAttribute('open');
+  }
+}
+
+async function saveEdit(form) {
+  const formData = new FormData(form);
+  const type = valueOf(formData, 'type');
+  const id = valueOf(formData, 'id');
+  const { path, body } = editRequest(type, id, formData);
+
+  await api(path, { method: 'PATCH', body });
+  closeEditDialog();
+  await refreshAll();
+  setStatus('Saved.');
+}
+
+function editRequest(type, id, formData) {
+  if (type === 'destination') {
+    return {
+      path: `/api/destinations/${id}`,
+      body: {
+        name: valueOf(formData, 'name'),
+        webhookUrl: valueOf(formData, 'webhookUrl'),
+        threadId: nullableValueOf(formData, 'threadId'),
+        username: nullableValueOf(formData, 'username'),
+        avatarUrl: nullableValueOf(formData, 'avatarUrl'),
+        isActive: formData.has('isActive'),
+      },
+    };
+  }
+
+  if (type === 'hook') {
+    return {
+      path: `/api/hooks/${id}`,
+      body: {
+        name: valueOf(formData, 'name'),
+        kind: 'statuspage',
+        pathToken: valueOf(formData, 'pathToken'),
+        destinationId: valueOf(formData, 'destinationId'),
+        configJson: parseJsonText(valueOf(formData, 'configJson') || '{}'),
+        isActive: formData.has('isActive'),
+      },
+    };
+  }
+
+  if (type === 'timer') {
+    const maxItems = Number(valueOf(formData, 'maxItems'));
+    return {
+      path: `/api/timers/${id}`,
+      body: {
+        name: valueOf(formData, 'name'),
+        kind: 'rss',
+        destinationId: valueOf(formData, 'destinationId'),
+        configJson: {
+          max_items_per_run: Number.isInteger(maxItems) ? maxItems : 5,
+          post_on_first_run: formData.has('postOnFirstRun'),
+        },
+        isActive: formData.has('isActive'),
+      },
+    };
+  }
+
+  if (type === 'feed') {
+    return {
+      path: `/api/rss-feeds/${id}`,
+      body: {
+        feedUrl: valueOf(formData, 'feedUrl'),
+        title: nullableValueOf(formData, 'title'),
+      },
+    };
+  }
+
+  throw new Error('Unsupported edit target.');
 }
 
 async function runRss() {
@@ -329,7 +475,7 @@ function renderFeeds() {
       <td>${escapeHtml(feed.title || '-')}</td>
       <td><code>${escapeHtml(feed.feedUrl)}</code></td>
       <td>${formatDate(feed.createdAt)}</td>
-      <td><div class="row-actions"><button type="button" class="icon-button danger" data-row-action="delete-feed" data-id="${feed.id}" title="Delete feed" aria-label="Delete feed">×</button></div></td>
+      <td><div class="row-actions"><button type="button" class="icon-button" data-row-action="edit-feed" data-id="${feed.id}" title="Edit feed" aria-label="Edit feed">✎</button><button type="button" class="icon-button danger" data-row-action="delete-feed" data-id="${feed.id}" title="Delete feed" aria-label="Delete feed">⌫</button></div></td>
     `;
     return row;
   }));
@@ -363,29 +509,169 @@ function updateMetrics() {
 }
 
 function destinationActions(destination) {
+  const editButton = `<button type="button" class="icon-button" data-row-action="edit-destination" data-id="${destination.id}" title="Edit" aria-label="Edit">✎</button>`;
   const testButton = destination.isActive
     ? `<button type="button" class="icon-button" data-row-action="test-destination" data-id="${destination.id}" title="Send test" aria-label="Send test">▶</button>`
     : '';
   const disableButton = destination.isActive
     ? `<button type="button" class="icon-button danger" data-row-action="disable-destination" data-id="${destination.id}" title="Disable" aria-label="Disable">×</button>`
     : `<button type="button" class="icon-button" data-row-action="enable-destination" data-id="${destination.id}" title="Re-enable" aria-label="Re-enable">✓</button>`;
-  return `<div class="row-actions">${testButton}${disableButton}</div>`;
+  const deleteButton = destination.isActive
+    ? ''
+    : `<button type="button" class="icon-button danger" data-row-action="delete-destination" data-id="${destination.id}" title="Delete" aria-label="Delete">⌫</button>`;
+  return `<div class="row-actions">${editButton}${testButton}${disableButton}${deleteButton}</div>`;
 }
 
 function hookActions(hook) {
+  const editButton = `<button type="button" class="icon-button" data-row-action="edit-hook" data-id="${hook.id}" title="Edit" aria-label="Edit">✎</button>`;
   if (!hook.isActive) {
-    return `<div class="row-actions"><button type="button" class="icon-button" data-row-action="enable-hook" data-id="${hook.id}" title="Re-enable" aria-label="Re-enable">✓</button></div>`;
+    return `<div class="row-actions">${editButton}<button type="button" class="icon-button" data-row-action="enable-hook" data-id="${hook.id}" title="Re-enable" aria-label="Re-enable">✓</button><button type="button" class="icon-button danger" data-row-action="delete-hook" data-id="${hook.id}" title="Delete" aria-label="Delete">⌫</button></div>`;
   }
 
-  return `<div class="row-actions"><button type="button" class="icon-button danger" data-row-action="disable-hook" data-id="${hook.id}" title="Disable" aria-label="Disable">×</button></div>`;
+  return `<div class="row-actions">${editButton}<button type="button" class="icon-button danger" data-row-action="disable-hook" data-id="${hook.id}" title="Disable" aria-label="Disable">×</button></div>`;
 }
 
 function timerActions(timer) {
+  const editButton = `<button type="button" class="icon-button" data-row-action="edit-timer" data-id="${timer.id}" title="Edit" aria-label="Edit">✎</button>`;
   if (!timer.isActive) {
-    return `<div class="row-actions"><button type="button" class="icon-button" data-row-action="enable-timer" data-id="${timer.id}" title="Re-enable" aria-label="Re-enable">✓</button></div>`;
+    return `<div class="row-actions">${editButton}<button type="button" class="icon-button" data-row-action="enable-timer" data-id="${timer.id}" title="Re-enable" aria-label="Re-enable">✓</button><button type="button" class="icon-button danger" data-row-action="delete-timer" data-id="${timer.id}" title="Delete" aria-label="Delete">⌫</button></div>`;
   }
 
-  return `<div class="row-actions"><button type="button" class="icon-button danger" data-row-action="disable-timer" data-id="${timer.id}" title="Disable" aria-label="Disable">×</button></div>`;
+  return `<div class="row-actions">${editButton}<button type="button" class="icon-button danger" data-row-action="disable-timer" data-id="${timer.id}" title="Disable" aria-label="Disable">×</button></div>`;
+}
+
+function findEditable(type, id) {
+  if (type === 'destination') {
+    return state.destinations.find((destination) => destination.id === id);
+  }
+
+  if (type === 'hook') {
+    return state.hooks.find((hook) => hook.id === id);
+  }
+
+  if (type === 'timer') {
+    return state.timers.find((timer) => timer.id === id);
+  }
+
+  if (type === 'feed') {
+    return [...state.feedsByTimer.values()].flat().find((feed) => feed.id === id);
+  }
+
+  return null;
+}
+
+function editTypeLabel(type) {
+  return {
+    destination: 'destination',
+    hook: 'hook',
+    timer: 'timer',
+    feed: 'feed',
+  }[type] ?? 'entry';
+}
+
+function editFieldsHtml(type, item) {
+  if (type === 'destination') {
+    return `
+      ${textField('name', 'Name', item.name, true)}
+      ${textField('webhookUrl', 'Webhook URL', item.webhookUrl, true, 'url', 'wide')}
+      ${textField('threadId', 'Thread ID', item.threadId ?? '')}
+      ${textField('username', 'Username', item.username ?? '')}
+      ${textField('avatarUrl', 'Avatar URL', item.avatarUrl ?? '', false, 'url')}
+      ${checkboxField('isActive', 'Active', item.isActive)}
+    `;
+  }
+
+  if (type === 'hook') {
+    return `
+      ${textField('name', 'Name', item.name, true)}
+      ${selectField('destinationId', 'Destination')}
+      ${textField('pathToken', 'Path token', item.pathToken, true, 'text', 'wide')}
+      ${textareaField('configJson', 'Config JSON', item.configJson || '{}', 'wide')}
+      ${checkboxField('isActive', 'Active', item.isActive)}
+    `;
+  }
+
+  if (type === 'timer') {
+    return `
+      ${textField('name', 'Name', item.name, true)}
+      ${selectField('destinationId', 'Destination')}
+      ${numberField('maxItems', 'Max items', 5, 1, 20)}
+      ${checkboxField('postOnFirstRun', 'Post first run', false)}
+      ${checkboxField('isActive', 'Active', item.isActive)}
+    `;
+  }
+
+  if (type === 'feed') {
+    return `
+      ${textField('feedUrl', 'Feed URL', item.feedUrl, true, 'url', 'wide')}
+      ${textField('title', 'Title', item.title ?? '')}
+    `;
+  }
+
+  return '';
+}
+
+function renderEditDestinationOptions(root, selectedId) {
+  const select = $('select[name="destinationId"]', root);
+  if (!select) {
+    return;
+  }
+
+  select.replaceChildren(...state.destinations.map((destination) => option(destination.id, destination.name)));
+  select.value = selectedId;
+}
+
+function textField(name, label, value, required = false, type = 'text', className = '') {
+  return `
+    <label class="${className}">
+      <span>${escapeHtml(label)}</span>
+      <input name="${escapeHtml(name)}" type="${escapeHtml(type)}" value="${escapeAttribute(value)}" autocomplete="off" ${required ? 'required' : ''} />
+    </label>
+  `;
+}
+
+function numberField(name, label, value, min, max) {
+  return `
+    <label>
+      <span>${escapeHtml(label)}</span>
+      <input name="${escapeHtml(name)}" type="number" min="${min}" max="${max}" value="${escapeAttribute(value)}" required />
+    </label>
+  `;
+}
+
+function selectField(name, label) {
+  return `
+    <label>
+      <span>${escapeHtml(label)}</span>
+      <select name="${escapeHtml(name)}" required></select>
+    </label>
+  `;
+}
+
+function textareaField(name, label, value, className = '') {
+  return `
+    <label class="${className}">
+      <span>${escapeHtml(label)}</span>
+      <textarea name="${escapeHtml(name)}" rows="4">${escapeHtml(value)}</textarea>
+    </label>
+  `;
+}
+
+function checkboxField(name, label, checked) {
+  return `
+    <label class="check-row">
+      <input name="${escapeHtml(name)}" type="checkbox" ${checked ? 'checked' : ''} />
+      <span>${escapeHtml(label)}</span>
+    </label>
+  `;
+}
+
+function timerConfig(timer) {
+  try {
+    return JSON.parse(timer.configJson || '{}');
+  } catch {
+    return {};
+  }
 }
 
 async function api(path, options = {}) {
@@ -507,4 +793,8 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, '&#096;');
 }

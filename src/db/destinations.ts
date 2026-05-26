@@ -186,3 +186,42 @@ export async function disableDiscordDestination(
 
 	return row ? toDiscordDestination(row) : null;
 }
+
+export type DeleteDiscordDestinationResult =
+	| { ok: true }
+	| { ok: false; reason: 'not_found' | 'active' | 'referenced' };
+
+export async function deleteInactiveDiscordDestination(
+	db: D1Database,
+	id: string,
+): Promise<DeleteDiscordDestinationResult> {
+	const destination = await getDiscordDestination(db, id);
+
+	if (!destination) {
+		return { ok: false, reason: 'not_found' };
+	}
+
+	if (destination.isActive) {
+		return { ok: false, reason: 'active' };
+	}
+
+	const references = await db
+		.prepare(
+			`
+			SELECT
+				(SELECT COUNT(*) FROM hooks WHERE destination_id = ?) +
+				(SELECT COUNT(*) FROM timers WHERE destination_id = ?) AS count
+			`,
+		)
+		.bind(id, id)
+		.first<{ count: number }>();
+
+	if ((references?.count ?? 0) > 0) {
+		return { ok: false, reason: 'referenced' };
+	}
+
+	await db.prepare('DELETE FROM deliveries WHERE destination_id = ?').bind(id).run();
+	const result = await db.prepare('DELETE FROM discord_destinations WHERE id = ?').bind(id).run();
+
+	return result.meta.changes > 0 ? { ok: true } : { ok: false, reason: 'not_found' };
+}

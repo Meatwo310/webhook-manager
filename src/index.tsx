@@ -5,10 +5,10 @@ import {
   createHook,
   createRssFeed,
   createTimer,
+  deleteInactiveDiscordDestination,
+  deleteInactiveHook,
+  deleteInactiveTimer,
   deleteRssFeed,
-  disableDiscordDestination,
-  disableHook,
-  disableTimer,
   getActiveHookByPathToken,
   getDiscordDestination,
   getHook,
@@ -316,6 +316,24 @@ function AdminPage() {
         </div>
       </section>
 
+      <dialog class="edit-dialog" data-edit-dialog>
+        <form method="dialog" class="edit-card" data-form="edit">
+          <div class="panel-header">
+            <h2 data-edit-title>Edit entry</h2>
+            <button type="button" class="icon-button" data-action="close-edit" title="Close" aria-label="Close">
+              ×
+            </button>
+          </div>
+          <input type="hidden" name="type" />
+          <input type="hidden" name="id" />
+          <div class="form-grid dialog-grid" data-edit-fields></div>
+          <div class="form-actions dialog-actions">
+            <button type="button" class="secondary-button" data-action="cancel-edit">Cancel</button>
+            <button type="submit" class="primary-button">Save</button>
+          </div>
+        </form>
+      </dialog>
+
       <script src="/static/theme-change.js"></script>
       <script src="/static/admin.js" type="module"></script>
     </main>
@@ -369,13 +387,21 @@ app.patch('/api/destinations/:id', async (c) => {
 })
 
 app.delete('/api/destinations/:id', async (c) => {
-  const destination = await disableDiscordDestination(c.env.DB, c.req.param('id'))
+  const result = await deleteInactiveDiscordDestination(c.env.DB, c.req.param('id'))
 
-  if (!destination) {
+  if (result.ok) {
+    return c.json({ ok: true })
+  }
+
+  if (result.reason === 'not_found') {
     return jsonError(c, 404, 'not_found', 'Discord destination was not found.')
   }
 
-  return c.json({ destination })
+  if (result.reason === 'active') {
+    return jsonError(c, 409, 'active_entry', 'Disable the Discord destination before deleting it.')
+  }
+
+  return jsonError(c, 409, 'referenced', 'Discord destination is still referenced by hooks or timers.')
 })
 
 app.post('/api/destinations/:id/test', async (c) => {
@@ -445,13 +471,17 @@ app.patch('/api/hooks/:id', async (c) => {
 })
 
 app.delete('/api/hooks/:id', async (c) => {
-  const hook = await disableHook(c.env.DB, c.req.param('id'))
+  const result = await deleteInactiveHook(c.env.DB, c.req.param('id'))
 
-  if (!hook) {
+  if (result.ok) {
+    return c.json({ ok: true })
+  }
+
+  if (result.reason === 'not_found') {
     return jsonError(c, 404, 'not_found', 'Hook was not found.')
   }
 
-  return c.json({ hook })
+  return jsonError(c, 409, 'active_entry', 'Disable the hook before deleting it.')
 })
 
 app.get('/api/hooks/:id/deliveries', async (c) => {
@@ -546,13 +576,17 @@ app.patch('/api/timers/:id', async (c) => {
 })
 
 app.delete('/api/timers/:id', async (c) => {
-  const timer = await disableTimer(c.env.DB, c.req.param('id'))
+  const result = await deleteInactiveTimer(c.env.DB, c.req.param('id'))
 
-  if (!timer) {
+  if (result.ok) {
+    return c.json({ ok: true })
+  }
+
+  if (result.reason === 'not_found') {
     return jsonError(c, 404, 'not_found', 'Timer was not found.')
   }
 
-  return c.json({ timer })
+  return jsonError(c, 409, 'active_entry', 'Disable the timer before deleting it.')
 })
 
 app.get('/api/timers/:id/feeds', async (c) => {

@@ -186,3 +186,22 @@ export async function disableHook(db: D1Database, id: string): Promise<Hook | nu
 
 	return row ? toHook(row) : null;
 }
+
+export type DeleteHookResult = { ok: true } | { ok: false; reason: 'not_found' | 'active' };
+
+export async function deleteInactiveHook(db: D1Database, id: string): Promise<DeleteHookResult> {
+	const hook = await getHook(db, id);
+
+	if (!hook) {
+		return { ok: false, reason: 'not_found' };
+	}
+
+	if (hook.isActive) {
+		return { ok: false, reason: 'active' };
+	}
+
+	await db.prepare("DELETE FROM deliveries WHERE source_type = 'hook' AND source_id = ?").bind(id).run();
+	const result = await db.prepare('DELETE FROM hooks WHERE id = ?').bind(id).run();
+
+	return result.meta.changes > 0 ? { ok: true } : { ok: false, reason: 'not_found' };
+}
