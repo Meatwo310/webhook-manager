@@ -243,15 +243,17 @@ label span {
 }
 
 .token-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
   align-items: end;
 }
 
 .token-row span {
-  flex-basis: 100%;
+  grid-column: 1 / -1;
 }
 
 .token-row input {
-  flex: 1;
+  min-width: 0;
 }
 
 .check-row {
