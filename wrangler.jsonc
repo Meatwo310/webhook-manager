@@ -11,6 +11,11 @@
 		"enabled": true
 	},
 	"upload_source_maps": true,
+	"triggers": {
+		"crons": [
+			"*/10 * * * *"
+		]
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",

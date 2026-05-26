@@ -3,23 +3,35 @@ import {
   createDelivery,
   createDiscordDestination,
   createHook,
+  createRssFeed,
+  createTimer,
   disableDiscordDestination,
   disableHook,
+  disableTimer,
   getActiveHookByPathToken,
   getDiscordDestination,
   getHook,
+  getTimer,
   listDiscordDestinations,
   listDeliveries,
   listHooks,
+  listRssFeedsByTimerId,
+  listTimers,
+  updateRssFeed,
   updateDiscordDestination,
   updateHook,
+  updateTimer,
   type CreateDiscordDestinationInput,
   type CreateHookInput,
+  type CreateRssFeedInput,
+  type CreateTimerInput,
   type DiscordDestination as DbDiscordDestination,
   type ListDeliveriesOptions,
   type SourceType,
   type UpdateDiscordDestinationInput,
   type UpdateHookInput,
+  type UpdateRssFeedInput,
+  type UpdateTimerInput,
 } from './db'
 import {
   postDiscordWebhook,
@@ -29,6 +41,7 @@ import {
 import { buildStatuspageDiscordPayload } from './hooks'
 import { jsonError, parseBooleanFlag, type AppBindings } from './http'
 import { renderer } from './renderer'
+import { runRssTimers } from './timers'
 
 const app = new Hono<AppBindings>();
 
@@ -203,6 +216,128 @@ app.get('/api/deliveries', async (c) => {
   return c.json({ deliveries })
 })
 
+app.get('/api/timers', async (c) => {
+  const timers = await listTimers(c.env.DB)
+
+  return c.json({ timers })
+})
+
+app.post('/api/timers', async (c) => {
+  const body = await readJson(c.req.raw)
+  const input = parseTimerInput(body, true)
+
+  if (!input.ok) {
+    return jsonError(c, 400, 'bad_request', input.message)
+  }
+
+  const destination = await getDiscordDestination(c.env.DB, input.value.destinationId)
+  if (!destination) {
+    return jsonError(c, 400, 'bad_request', 'destinationId does not exist.')
+  }
+
+  const timer = await createTimer(c.env.DB, input.value)
+
+  return c.json({ timer }, 201)
+})
+
+app.get('/api/timers/:id', async (c) => {
+  const timer = await getTimer(c.env.DB, c.req.param('id'))
+
+  if (!timer) {
+    return jsonError(c, 404, 'not_found', 'Timer was not found.')
+  }
+
+  return c.json({ timer })
+})
+
+app.patch('/api/timers/:id', async (c) => {
+  const body = await readJson(c.req.raw)
+  const input = parseTimerInput(body, false)
+
+  if (!input.ok) {
+    return jsonError(c, 400, 'bad_request', input.message)
+  }
+
+  if (input.value.destinationId) {
+    const destination = await getDiscordDestination(c.env.DB, input.value.destinationId)
+    if (!destination) {
+      return jsonError(c, 400, 'bad_request', 'destinationId does not exist.')
+    }
+  }
+
+  const timer = await updateTimer(c.env.DB, c.req.param('id'), input.value)
+
+  if (!timer) {
+    return jsonError(c, 404, 'not_found', 'Timer was not found.')
+  }
+
+  return c.json({ timer })
+})
+
+app.delete('/api/timers/:id', async (c) => {
+  const timer = await disableTimer(c.env.DB, c.req.param('id'))
+
+  if (!timer) {
+    return jsonError(c, 404, 'not_found', 'Timer was not found.')
+  }
+
+  return c.json({ timer })
+})
+
+app.get('/api/timers/:id/feeds', async (c) => {
+  const timer = await getTimer(c.env.DB, c.req.param('id'))
+
+  if (!timer) {
+    return jsonError(c, 404, 'not_found', 'Timer was not found.')
+  }
+
+  const feeds = await listRssFeedsByTimerId(c.env.DB, timer.id)
+
+  return c.json({ feeds })
+})
+
+app.post('/api/timers/:id/feeds', async (c) => {
+  const timer = await getTimer(c.env.DB, c.req.param('id'))
+
+  if (!timer) {
+    return jsonError(c, 404, 'not_found', 'Timer was not found.')
+  }
+
+  const body = await readJson(c.req.raw)
+  const input = parseRssFeedInput(body, timer.id, true)
+
+  if (!input.ok) {
+    return jsonError(c, 400, 'bad_request', input.message)
+  }
+
+  const feed = await createRssFeed(c.env.DB, input.value)
+
+  return c.json({ feed }, 201)
+})
+
+app.patch('/api/rss-feeds/:id', async (c) => {
+  const body = await readJson(c.req.raw)
+  const input = parseRssFeedInput(body, undefined, false)
+
+  if (!input.ok) {
+    return jsonError(c, 400, 'bad_request', input.message)
+  }
+
+  const feed = await updateRssFeed(c.env.DB, c.req.param('id'), input.value)
+
+  if (!feed) {
+    return jsonError(c, 404, 'not_found', 'RSS feed was not found.')
+  }
+
+  return c.json({ feed })
+})
+
+app.post('/api/timers/rss/run', async (c) => {
+  const result = await runRssTimers(c.env.DB)
+
+  return c.json({ result })
+})
+
 app.post('/hooks/:pathToken', async (c) => {
   const hook = await getActiveHookByPathToken(c.env.DB, c.req.param('pathToken'))
 
@@ -254,7 +389,12 @@ app.post('/hooks/:pathToken', async (c) => {
   return c.json({ result, delivery })
 })
 
-export default app
+export default {
+  fetch: app.fetch,
+  scheduled: async (_controller, env) => {
+    await runRssTimers(env.DB)
+  },
+} satisfies ExportedHandler<CloudflareBindings>
 
 type ValidationResult<T> = { ok: true; value: T } | { ok: false; message: string }
 
@@ -375,6 +515,100 @@ function parseHookInput(
       ...(destinationId ? { destinationId } : {}),
       ...(configJson.value !== undefined ? { configJson: configJson.value } : {}),
       ...(isActive !== undefined ? { isActive: isActive === 1 } : {}),
+    },
+  }
+}
+
+function parseTimerInput(value: unknown, requireFields: true): ValidationResult<CreateTimerInput>
+function parseTimerInput(value: unknown, requireFields: false): ValidationResult<UpdateTimerInput>
+function parseTimerInput(
+  value: unknown,
+  requireFields: boolean,
+): ValidationResult<CreateTimerInput | UpdateTimerInput> {
+  if (!isRecord(value)) {
+    return { ok: false, message: 'Request body must be a JSON object.' }
+  }
+
+  const name = getString(value.name)
+  const kind = getString(value.kind) ?? 'rss'
+  const destinationId = getString(value.destinationId) ?? getString(value.destination_id)
+  const isActive = parseBooleanFlag(value.isActive ?? value.is_active)
+  const lastRunAt = getNullableString(value.lastRunAt ?? value.last_run_at)
+  const configJson = normalizeConfigJson(value.configJson ?? value.config_json)
+
+  if (requireFields && !name) {
+    return { ok: false, message: 'name is required.' }
+  }
+
+  if (kind !== 'rss') {
+    return { ok: false, message: 'Only rss timers are supported for now.' }
+  }
+
+  if (requireFields && !destinationId) {
+    return { ok: false, message: 'destinationId is required.' }
+  }
+
+  if ((value.isActive !== undefined || value.is_active !== undefined) && isActive === undefined) {
+    return { ok: false, message: 'isActive must be boolean-like.' }
+  }
+
+  if (lastRunAt && Number.isNaN(Date.parse(lastRunAt))) {
+    return { ok: false, message: 'lastRunAt must be an ISO-compatible datetime.' }
+  }
+
+  if (!configJson.ok) {
+    return { ok: false, message: configJson.message }
+  }
+
+  return {
+    ok: true,
+    value: {
+      ...(name ? { name } : {}),
+      kind,
+      ...(destinationId ? { destinationId } : {}),
+      ...(configJson.value !== undefined ? { configJson: configJson.value } : {}),
+      ...(isActive !== undefined ? { isActive: isActive === 1 } : {}),
+      ...(lastRunAt !== undefined ? { lastRunAt } : {}),
+    },
+  }
+}
+
+function parseRssFeedInput(
+  value: unknown,
+  timerId: string,
+  requireFields: true,
+): ValidationResult<CreateRssFeedInput>
+function parseRssFeedInput(
+  value: unknown,
+  timerId: undefined,
+  requireFields: false,
+): ValidationResult<UpdateRssFeedInput>
+function parseRssFeedInput(
+  value: unknown,
+  timerId: string | undefined,
+  requireFields: boolean,
+): ValidationResult<CreateRssFeedInput | UpdateRssFeedInput> {
+  if (!isRecord(value)) {
+    return { ok: false, message: 'Request body must be a JSON object.' }
+  }
+
+  const feedUrl = getString(value.feedUrl) ?? getString(value.feed_url)
+  const title = getNullableString(value.title)
+
+  if (requireFields && !feedUrl) {
+    return { ok: false, message: 'feedUrl is required.' }
+  }
+
+  if (feedUrl && !isHttpUrl(feedUrl)) {
+    return { ok: false, message: 'feedUrl must be an HTTP URL.' }
+  }
+
+  return {
+    ok: true,
+    value: {
+      ...(timerId ? { timerId } : {}),
+      ...(feedUrl ? { feedUrl } : {}),
+      ...(title !== undefined ? { title } : {}),
     },
   }
 }
