@@ -1,4 +1,19 @@
-import type { CreateDeliveryInput, Delivery, DeliveryRow } from './types';
+import type { CreateDeliveryInput, Delivery, DeliveryRow, ListDeliveriesOptions } from './types';
+
+const DEFAULT_DELIVERIES_LIMIT = 50;
+const MAX_DELIVERIES_LIMIT = 100;
+
+const selectDeliveryColumns = `
+	id,
+	source_type,
+	source_id,
+	destination_id,
+	status,
+	discord_message_id,
+	response_status,
+	error_message,
+	created_at
+`;
 
 function toDelivery(row: DeliveryRow): Delivery {
 	return {
@@ -71,4 +86,47 @@ export async function createDelivery(
 		.first<DeliveryRow>();
 
 	return row ? toDelivery(row) : delivery;
+}
+
+export async function listDeliveries(
+	db: D1Database,
+	options: ListDeliveriesOptions = {},
+): Promise<Delivery[]> {
+	const where: string[] = [];
+	const values: (number | string)[] = [];
+
+	if (options.sourceType !== undefined) {
+		where.push('source_type = ?');
+		values.push(options.sourceType);
+	}
+
+	if (options.sourceId !== undefined) {
+		where.push('source_id = ?');
+		values.push(options.sourceId);
+	}
+
+	if (options.destinationId !== undefined) {
+		where.push('destination_id = ?');
+		values.push(options.destinationId);
+	}
+
+	const limit = Math.min(
+		Math.max(Math.trunc(options.limit ?? DEFAULT_DELIVERIES_LIMIT), 1),
+		MAX_DELIVERIES_LIMIT,
+	);
+	const offset = Math.max(Math.trunc(options.offset ?? 0), 0);
+	values.push(limit, offset);
+
+	const statement: D1PreparedStatement = db.prepare(
+		`
+		SELECT ${selectDeliveryColumns}
+		FROM deliveries
+		${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+		ORDER BY created_at DESC
+		LIMIT ? OFFSET ?
+		`,
+	);
+	const { results } = await statement.bind(...values).all<DeliveryRow>();
+
+	return results.map(toDelivery);
 }

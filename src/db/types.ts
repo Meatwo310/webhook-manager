@@ -119,3 +119,11 @@ export type CreateDeliveryInput = {
 	responseStatus?: number | null;
 	errorMessage?: string | null;
 };
+
+export type ListDeliveriesOptions = {
+	sourceType?: SourceType;
+	sourceId?: string;
+	destinationId?: string;
+	limit?: number;
+	offset?: number;
+};

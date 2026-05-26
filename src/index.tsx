@@ -7,13 +7,17 @@ import {
   disableHook,
   getActiveHookByPathToken,
   getDiscordDestination,
+  getHook,
   listDiscordDestinations,
+  listDeliveries,
   listHooks,
   updateDiscordDestination,
   updateHook,
   type CreateDiscordDestinationInput,
   type CreateHookInput,
   type DiscordDestination as DbDiscordDestination,
+  type ListDeliveriesOptions,
+  type SourceType,
   type UpdateDiscordDestinationInput,
   type UpdateHookInput,
 } from './db'
@@ -164,6 +168,39 @@ app.delete('/api/hooks/:id', async (c) => {
   }
 
   return c.json({ hook })
+})
+
+app.get('/api/hooks/:id/deliveries', async (c) => {
+  const hook = await getHook(c.env.DB, c.req.param('id'))
+
+  if (!hook) {
+    return jsonError(c, 404, 'not_found', 'Hook was not found.')
+  }
+
+  const options = parseDeliveryListOptions(c.req.query(), {
+    sourceType: 'hook',
+    sourceId: hook.id,
+  })
+
+  if (!options.ok) {
+    return jsonError(c, 400, 'bad_request', options.message)
+  }
+
+  const deliveries = await listDeliveries(c.env.DB, options.value)
+
+  return c.json({ deliveries })
+})
+
+app.get('/api/deliveries', async (c) => {
+  const options = parseDeliveryListOptions(c.req.query())
+
+  if (!options.ok) {
+    return jsonError(c, 400, 'bad_request', options.message)
+  }
+
+  const deliveries = await listDeliveries(c.env.DB, options.value)
+
+  return c.json({ deliveries })
 })
 
 app.post('/hooks/:pathToken', async (c) => {
@@ -361,6 +398,73 @@ function normalizeConfigJson(value: unknown): ValidationResult<string | undefine
   } catch {
     return { ok: false, message: 'configJson must be serializable.' }
   }
+}
+
+function parseDeliveryListOptions(
+  query: Record<string, string | string[]>,
+  enforced: Pick<ListDeliveriesOptions, 'sourceType' | 'sourceId'> = {},
+): ValidationResult<ListDeliveriesOptions> {
+  const sourceType =
+    enforced.sourceType ??
+    parseSourceType(getQueryString(query, 'sourceType') ?? getQueryString(query, 'source_type'))
+  const sourceId = enforced.sourceId ?? getQueryString(query, 'sourceId') ?? getQueryString(query, 'source_id')
+  const destinationId = getQueryString(query, 'destinationId') ?? getQueryString(query, 'destination_id')
+  const limit = parsePositiveInteger(getQueryString(query, 'limit'))
+  const offset = parseNonNegativeInteger(getQueryString(query, 'offset'))
+
+  if (sourceType === false) {
+    return { ok: false, message: 'sourceType must be hook or timer.' }
+  }
+
+  if (limit === false) {
+    return { ok: false, message: 'limit must be a positive integer.' }
+  }
+
+  if (offset === false) {
+    return { ok: false, message: 'offset must be a non-negative integer.' }
+  }
+
+  return {
+    ok: true,
+    value: {
+      ...(sourceType ? { sourceType } : {}),
+      ...(sourceId ? { sourceId } : {}),
+      ...(destinationId ? { destinationId } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(offset !== undefined ? { offset } : {}),
+    },
+  }
+}
+
+function parseSourceType(value: string | undefined): SourceType | undefined | false {
+  if (value === undefined) {
+    return undefined
+  }
+
+  return value === 'hook' || value === 'timer' ? value : false
+}
+
+function parsePositiveInteger(value: string | undefined): number | undefined | false {
+  if (value === undefined) {
+    return undefined
+  }
+
+  const numberValue = Number(value)
+  return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : false
+}
+
+function parseNonNegativeInteger(value: string | undefined): number | undefined | false {
+  if (value === undefined) {
+    return undefined
+  }
+
+  const numberValue = Number(value)
+  return Number.isInteger(numberValue) && numberValue >= 0 ? numberValue : false
+}
+
+function getQueryString(query: Record<string, string | string[]>, key: string): string | undefined {
+  const value = query[key]
+  return Array.isArray(value) ? value[0] : value
 }
 
 function getString(value: unknown): string | undefined {
