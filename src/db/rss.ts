@@ -150,6 +150,13 @@ export async function updateRssFeed(
 	return row ? toRssFeed(row) : null;
 }
 
+export async function deleteRssFeed(db: D1Database, id: string): Promise<boolean> {
+	await db.prepare('DELETE FROM rss_items WHERE feed_id = ?').bind(id).run();
+	const result = await db.prepare('DELETE FROM rss_feeds WHERE id = ?').bind(id).run();
+
+	return result.meta.changes > 0;
+}
+
 export async function insertRssItemIfNew(
 	db: D1Database,
 	input: CreateRssItemInput,

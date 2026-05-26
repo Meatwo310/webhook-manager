@@ -201,12 +201,29 @@ async function handleRowAction(button) {
     'disable-destination': `/api/destinations/${id}`,
     'disable-hook': `/api/hooks/${id}`,
     'disable-timer': `/api/timers/${id}`,
+    'delete-feed': `/api/rss-feeds/${id}`,
   };
 
   if (paths[rowAction]) {
     await api(paths[rowAction], { method: 'DELETE' });
     await refreshAll();
-    setStatus('Disabled.');
+    setStatus(rowAction === 'delete-feed' ? 'Feed deleted.' : 'Disabled.');
+    return;
+  }
+
+  const reenableTargets = {
+    'enable-destination': `/api/destinations/${id}`,
+    'enable-hook': `/api/hooks/${id}`,
+    'enable-timer': `/api/timers/${id}`,
+  };
+
+  if (reenableTargets[rowAction]) {
+    await api(reenableTargets[rowAction], {
+      method: 'PATCH',
+      body: { isActive: true },
+    });
+    await refreshAll();
+    setStatus('Re-enabled.');
   }
 }
 
@@ -221,6 +238,7 @@ function render() {
   renderDestinations();
   renderHooks();
   renderTimers();
+  renderFeeds();
   renderDeliveries();
   updateMetrics();
 }
@@ -294,6 +312,29 @@ function renderTimers() {
   }));
 }
 
+function renderFeeds() {
+  const body = $('[data-list="feeds"]');
+  if (!body) {
+    return;
+  }
+
+  const rows = state.timers.flatMap((timer) => {
+    return (state.feedsByTimer.get(timer.id) ?? []).map((feed) => ({ timer, feed }));
+  });
+
+  body.replaceChildren(...rows.map(({ timer, feed }) => {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>${escapeHtml(timer.name)}</td>
+      <td>${escapeHtml(feed.title || '-')}</td>
+      <td><code>${escapeHtml(feed.feedUrl)}</code></td>
+      <td>${formatDate(feed.createdAt)}</td>
+      <td><div class="row-actions"><button type="button" class="icon-button danger" data-row-action="delete-feed" data-id="${feed.id}" title="Delete feed" aria-label="Delete feed">×</button></div></td>
+    `;
+    return row;
+  }));
+}
+
 function renderDeliveries() {
   const body = $('[data-list="deliveries"]');
   if (!body) {
@@ -327,13 +368,13 @@ function destinationActions(destination) {
     : '';
   const disableButton = destination.isActive
     ? `<button type="button" class="icon-button danger" data-row-action="disable-destination" data-id="${destination.id}" title="Disable" aria-label="Disable">×</button>`
-    : '';
+    : `<button type="button" class="icon-button" data-row-action="enable-destination" data-id="${destination.id}" title="Re-enable" aria-label="Re-enable">✓</button>`;
   return `<div class="row-actions">${testButton}${disableButton}</div>`;
 }
 
 function hookActions(hook) {
   if (!hook.isActive) {
-    return '';
+    return `<div class="row-actions"><button type="button" class="icon-button" data-row-action="enable-hook" data-id="${hook.id}" title="Re-enable" aria-label="Re-enable">✓</button></div>`;
   }
 
   return `<div class="row-actions"><button type="button" class="icon-button danger" data-row-action="disable-hook" data-id="${hook.id}" title="Disable" aria-label="Disable">×</button></div>`;
@@ -341,7 +382,7 @@ function hookActions(hook) {
 
 function timerActions(timer) {
   if (!timer.isActive) {
-    return '';
+    return `<div class="row-actions"><button type="button" class="icon-button" data-row-action="enable-timer" data-id="${timer.id}" title="Re-enable" aria-label="Re-enable">✓</button></div>`;
   }
 
   return `<div class="row-actions"><button type="button" class="icon-button danger" data-row-action="disable-timer" data-id="${timer.id}" title="Disable" aria-label="Disable">×</button></div>`;

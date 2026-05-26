@@ -5,6 +5,7 @@ import {
   createHook,
   createRssFeed,
   createTimer,
+  deleteRssFeed,
   disableDiscordDestination,
   disableHook,
   disableTimer,
@@ -60,6 +61,14 @@ function AdminPage() {
           <p>Discord destinations, hooks, RSS timers, and deliveries</p>
         </div>
         <div class="topbar-actions">
+          <label class="theme-picker">
+            <span>Theme</span>
+            <select data-choose-theme data-key="wm-theme" aria-label="Theme">
+              <option value="">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
           <button type="button" class="icon-button" data-action="refresh" title="Refresh" aria-label="Refresh">
             ↻
           </button>
@@ -257,6 +266,23 @@ function AdminPage() {
             <tbody data-list="timers"></tbody>
           </table>
         </div>
+        <div class="subsection-header">
+          <h3>Feeds</h3>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Timer</th>
+                <th>Title</th>
+                <th>URL</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody data-list="feeds"></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="panel" data-tab-panel="deliveries">
@@ -290,6 +316,7 @@ function AdminPage() {
         </div>
       </section>
 
+      <script src="/static/theme-change.js"></script>
       <script src="/static/admin.js" type="module"></script>
     </main>
   )
@@ -574,6 +601,16 @@ app.patch('/api/rss-feeds/:id', async (c) => {
   }
 
   return c.json({ feed })
+})
+
+app.delete('/api/rss-feeds/:id', async (c) => {
+  const deleted = await deleteRssFeed(c.env.DB, c.req.param('id'))
+
+  if (!deleted) {
+    return jsonError(c, 404, 'not_found', 'RSS feed was not found.')
+  }
+
+  return c.json({ ok: true })
 })
 
 app.post('/api/timers/rss/run', async (c) => {

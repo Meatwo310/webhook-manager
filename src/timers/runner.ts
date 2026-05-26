@@ -30,6 +30,17 @@ type RunRssTimersResult = {
   failed: number;
 };
 
+type RssPostCandidate = {
+  feed: RssFeed;
+  feedTitle: string | null;
+  item: ParsedRssItem;
+  sequence: number;
+};
+
+type PreparedRssPostCandidate = RssPostCandidate & {
+  itemId: string;
+};
+
 const DEFAULT_MAX_ITEMS_PER_RUN = 5;
 const MAX_ITEMS_PER_RUN_LIMIT = 20;
 
@@ -84,28 +95,58 @@ async function runRssTimer(
     return result;
   }
 
+  const candidates: RssPostCandidate[] = [];
+  let sequence = 0;
+
   for (const feed of feeds) {
-    const feedResult = await runRssFeed(db, timer, feed, destination, config);
+    const feedResult = await collectRssFeedItems(db, timer, feed, destination);
     result.posted += feedResult.posted;
     result.skipped += feedResult.skipped;
     result.failed += feedResult.failed;
+    candidates.push(
+      ...feedResult.candidates.map((candidate) => ({
+        ...candidate,
+        sequence: sequence++,
+      })),
+    );
+  }
+
+  const selectedCandidates: PreparedRssPostCandidate[] = [];
+  for (const candidate of candidates.sort(compareCandidatesNewestFirst)) {
+    const inserted = await insertFeedItem(db, candidate.feed, candidate.item, timer, config);
+    if (!inserted.shouldPost) {
+      result.skipped += inserted.wasNew ? 1 : 0;
+      continue;
+    }
+
+    selectedCandidates.push({ ...candidate, itemId: inserted.itemId });
+    if (selectedCandidates.length >= config.max_items_per_run) {
+      break;
+    }
+  }
+
+  for (const candidate of selectedCandidates.sort(compareCandidatesOldestFirst)) {
+    const postResult = await postRssCandidate(db, timer, destination, candidate);
+    result.posted += postResult.posted;
+    result.skipped += postResult.skipped;
+    result.failed += postResult.failed;
   }
 
   await updateTimerLastRunAt(db, timer.id, new Date().toISOString());
   return result;
 }
 
-async function runRssFeed(
+async function collectRssFeedItems(
   db: D1Database,
   timer: Timer,
   feed: RssFeed,
   destination: DbDiscordDestination,
-  config: Required<RssTimerConfig>,
-): Promise<Pick<RunRssTimersResult, 'posted' | 'skipped' | 'failed'>> {
+): Promise<Pick<RunRssTimersResult, 'posted' | 'skipped' | 'failed'> & { candidates: Omit<RssPostCandidate, 'sequence'>[] }> {
   const result = {
     posted: 0,
     skipped: 0,
     failed: 0,
+    candidates: [] as Omit<RssPostCandidate, 'sequence'>[],
   };
 
   try {
@@ -133,34 +174,11 @@ async function runRssFeed(
       await updateRssFeed(db, feed.id, { title: parsed.title });
     }
 
-    const items = parsed.items.slice(0, config.max_items_per_run);
-    for (const item of items) {
-      const inserted = await insertFeedItem(db, feed, item, timer, config);
-      if (!inserted.shouldPost) {
-        result.skipped += inserted.wasNew ? 1 : 0;
-        continue;
-      }
-
-      const delivery = await postDiscordWebhook(
-        toWebhookDestination(destination),
-        buildRssDiscordPayload(parsed.title ?? feed.title, item),
-      );
-      await createDelivery(db, {
-        sourceType: 'timer',
-        sourceId: timer.id,
-        destinationId: destination.id,
-        status: delivery.ok ? 'success' : 'failed',
-        responseStatus: delivery.status,
-        errorMessage: delivery.error ?? (delivery.ok ? null : delivery.body),
-      });
-
-      if (delivery.ok) {
-        await markRssItemPosted(db, inserted.itemId);
-        result.posted += 1;
-      } else {
-        result.failed += 1;
-      }
-    }
+    result.candidates = parsed.items.map((item) => ({
+      feed,
+      feedTitle: parsed.title ?? feed.title,
+      item,
+    }));
   } catch (error) {
     await createDelivery(db, {
       sourceType: 'timer',
@@ -169,6 +187,41 @@ async function runRssFeed(
       status: 'failed',
       errorMessage: error instanceof Error ? error.message : String(error),
     });
+    result.failed += 1;
+  }
+
+  return result;
+}
+
+async function postRssCandidate(
+  db: D1Database,
+  timer: Timer,
+  destination: DbDiscordDestination,
+  candidate: PreparedRssPostCandidate,
+): Promise<Pick<RunRssTimersResult, 'posted' | 'skipped' | 'failed'>> {
+  const result = {
+    posted: 0,
+    skipped: 0,
+    failed: 0,
+  };
+
+  const delivery = await postDiscordWebhook(
+    toWebhookDestination(destination),
+    buildRssDiscordPayload(candidate.feedTitle, candidate.item),
+  );
+  await createDelivery(db, {
+    sourceType: 'timer',
+    sourceId: timer.id,
+    destinationId: destination.id,
+    status: delivery.ok ? 'success' : 'failed',
+    responseStatus: delivery.status,
+    errorMessage: delivery.error ?? (delivery.ok ? null : delivery.body),
+  });
+
+  if (delivery.ok) {
+    await markRssItemPosted(db, candidate.itemId);
+    result.posted += 1;
+  } else {
     result.failed += 1;
   }
 
@@ -197,6 +250,61 @@ async function insertFeedItem(
     shouldPost: Boolean(inserted && shouldPost),
     wasNew: inserted !== null,
   };
+}
+
+function compareCandidatesNewestFirst(a: RssPostCandidate, b: RssPostCandidate): number {
+  const aTime = toPublishedAtTime(a.item.publishedAt);
+  const bTime = toPublishedAtTime(b.item.publishedAt);
+
+  if (aTime === null && bTime === null) {
+    return a.sequence - b.sequence;
+  }
+
+  if (aTime === null) {
+    return 1;
+  }
+
+  if (bTime === null) {
+    return -1;
+  }
+
+  if (aTime !== bTime) {
+    return bTime - aTime;
+  }
+
+  return a.sequence - b.sequence;
+}
+
+function compareCandidatesOldestFirst(a: RssPostCandidate, b: RssPostCandidate): number {
+  const aTime = toPublishedAtTime(a.item.publishedAt);
+  const bTime = toPublishedAtTime(b.item.publishedAt);
+
+  if (aTime === null && bTime === null) {
+    return a.sequence - b.sequence;
+  }
+
+  if (aTime === null) {
+    return 1;
+  }
+
+  if (bTime === null) {
+    return -1;
+  }
+
+  if (aTime !== bTime) {
+    return aTime - bTime;
+  }
+
+  return a.sequence - b.sequence;
+}
+
+function toPublishedAtTime(publishedAt: string | null): number | null {
+  if (!publishedAt) {
+    return null;
+  }
+
+  const time = Date.parse(publishedAt);
+  return Number.isNaN(time) ? null : time;
 }
 
 function parseRssTimerConfig(configJson: string): Required<RssTimerConfig> {

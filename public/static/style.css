@@ -1,5 +1,4 @@
 :root {
-  color-scheme: light;
   --bg: #f6f7f9;
   --text: #20242c;
   --muted: #68707d;
@@ -12,6 +11,44 @@
   --success: #1f8a4c;
   --warning: #a15c08;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #111418;
+  --text: #edf1f7;
+  --muted: #a2aab8;
+  --line: #313844;
+  --surface: #191e25;
+  --surface-soft: #222935;
+  --accent: #6aa1ff;
+  --accent-strong: #8bb6ff;
+  --danger: #ff8a81;
+  --success: #6fd89d;
+  --warning: #f4b86a;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]),
+  :root[data-theme=""] {
+    --bg: #111418;
+    --text: #edf1f7;
+    --muted: #a2aab8;
+    --line: #313844;
+    --surface: #191e25;
+    --surface-soft: #222935;
+    --accent: #6aa1ff;
+    --accent-strong: #8bb6ff;
+    --danger: #ff8a81;
+    --success: #6fd89d;
+    --warning: #f4b86a;
+    color-scheme: dark;
+  }
 }
 
 * {
@@ -74,6 +111,20 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.theme-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-picker span {
+  margin: 0;
+}
+
+.theme-picker select {
+  width: 128px;
 }
 
 .metrics {
@@ -223,7 +274,7 @@ textarea {
   min-height: 40px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #fff;
+  background: var(--surface);
   color: var(--text);
   padding: 8px 10px;
 }
@@ -307,7 +358,7 @@ tr:last-child td {
 
 code {
   word-break: break-all;
-  color: #334155;
+  color: var(--text);
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
 }
@@ -327,17 +378,17 @@ code {
 }
 
 .success {
-  background: #e8f5ee;
+  background: color-mix(in srgb, var(--success) 14%, transparent);
   color: var(--success);
 }
 
 .muted-pill {
-  background: #eef1f5;
+  background: var(--surface-soft);
   color: var(--muted);
 }
 
 .danger-pill {
-  background: #fae9e8;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
   color: var(--danger);
 }
 
@@ -356,6 +407,14 @@ code {
   .panel-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .topbar-actions {
+    align-items: stretch;
+  }
+
+  .theme-picker {
+    justify-content: space-between;
   }
 
   .metrics {
