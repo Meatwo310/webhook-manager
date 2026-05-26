@@ -21,10 +21,10 @@
 		]
 	},
 	"d1_databases": [
-		{
+  	{
 			"binding": "DB",
 			"database_name": "webhook-manager",
-			"database_id": "00000000-0000-0000-0000-000000000000"
+			"database_id": "17417ca1-f3f1-47ed-a94d-bb66a94cdbd1"
 		}
 	],
 	"compatibility_flags": [
