@@ -48,8 +48,252 @@ const app = new Hono<AppBindings>();
 app.use(renderer)
 
 app.get('/', (c) => {
-  return c.render(<h1>Hello!</h1>)
+  return c.render(<AdminPage />)
 })
+
+function AdminPage() {
+  return (
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>webhook-manager</h1>
+          <p>Discord destinations, hooks, RSS timers, and deliveries</p>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" class="icon-button" data-action="refresh" title="Refresh" aria-label="Refresh">
+            ↻
+          </button>
+          <button type="button" class="primary-button" data-action="run-rss">
+            Run RSS
+          </button>
+        </div>
+      </header>
+
+      <section class="metrics" aria-label="Overview">
+        <div>
+          <span class="metric-value" data-metric="destinations">0</span>
+          <span class="metric-label">Destinations</span>
+        </div>
+        <div>
+          <span class="metric-value" data-metric="hooks">0</span>
+          <span class="metric-label">Hooks</span>
+        </div>
+        <div>
+          <span class="metric-value" data-metric="timers">0</span>
+          <span class="metric-label">Timers</span>
+        </div>
+        <div>
+          <span class="metric-value" data-metric="deliveries">0</span>
+          <span class="metric-label">Recent deliveries</span>
+        </div>
+      </section>
+
+      <nav class="tabs" aria-label="Admin sections">
+        <button type="button" class="tab is-active" data-tab-target="destinations">Destinations</button>
+        <button type="button" class="tab" data-tab-target="hooks">Hooks</button>
+        <button type="button" class="tab" data-tab-target="timers">Timers</button>
+        <button type="button" class="tab" data-tab-target="deliveries">Deliveries</button>
+      </nav>
+
+      <p class="notice" data-status role="status"></p>
+
+      <section class="panel is-active" data-tab-panel="destinations">
+        <div class="panel-header">
+          <h2>Destinations</h2>
+        </div>
+        <form class="form-grid" data-form="destination">
+          <label>
+            <span>Name</span>
+            <input name="name" autocomplete="off" required />
+          </label>
+          <label class="wide">
+            <span>Webhook URL</span>
+            <input name="webhookUrl" type="url" autocomplete="off" required />
+          </label>
+          <label>
+            <span>Thread ID</span>
+            <input name="threadId" autocomplete="off" />
+          </label>
+          <label>
+            <span>Username</span>
+            <input name="username" autocomplete="off" />
+          </label>
+          <label>
+            <span>Avatar URL</span>
+            <input name="avatarUrl" type="url" autocomplete="off" />
+          </label>
+          <label class="check-row">
+            <input name="isActive" type="checkbox" checked />
+            <span>Active</span>
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="primary-button">Create</button>
+          </div>
+        </form>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Webhook</th>
+                <th>Thread</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody data-list="destinations"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" data-tab-panel="hooks">
+        <div class="panel-header">
+          <h2>Hooks</h2>
+        </div>
+        <form class="form-grid" data-form="hook">
+          <label>
+            <span>Name</span>
+            <input name="name" autocomplete="off" required />
+          </label>
+          <label>
+            <span>Destination</span>
+            <select name="destinationId" required></select>
+          </label>
+          <label class="wide token-row">
+            <span>Path token</span>
+            <input name="pathToken" autocomplete="off" required />
+            <button type="button" class="icon-button" data-action="generate-token" title="Generate token" aria-label="Generate token">
+              ✦
+            </button>
+          </label>
+          <label class="wide">
+            <span>Config JSON</span>
+            <textarea name="configJson" rows={3}>{'{}'}</textarea>
+          </label>
+          <label class="check-row">
+            <input name="isActive" type="checkbox" checked />
+            <span>Active</span>
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="primary-button">Create</button>
+          </div>
+        </form>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Kind</th>
+                <th>Endpoint</th>
+                <th>Destination</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody data-list="hooks"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" data-tab-panel="timers">
+        <div class="panel-header">
+          <h2>Timers</h2>
+        </div>
+        <form class="form-grid" data-form="timer">
+          <label>
+            <span>Name</span>
+            <input name="name" autocomplete="off" required />
+          </label>
+          <label>
+            <span>Destination</span>
+            <select name="destinationId" required></select>
+          </label>
+          <label>
+            <span>Max items</span>
+            <input name="maxItems" type="number" min="1" max="20" value="5" required />
+          </label>
+          <label class="check-row">
+            <input name="postOnFirstRun" type="checkbox" />
+            <span>Post first run</span>
+          </label>
+          <label class="check-row">
+            <input name="isActive" type="checkbox" checked />
+            <span>Active</span>
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="primary-button">Create</button>
+          </div>
+        </form>
+        <form class="form-grid compact" data-form="feed">
+          <label>
+            <span>Timer</span>
+            <select name="timerId" required></select>
+          </label>
+          <label class="wide">
+            <span>Feed URL</span>
+            <input name="feedUrl" type="url" autocomplete="off" required />
+          </label>
+          <label>
+            <span>Title</span>
+            <input name="title" autocomplete="off" />
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="primary-button">Add feed</button>
+          </div>
+        </form>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Destination</th>
+                <th>Config</th>
+                <th>Feeds</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody data-list="timers"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" data-tab-panel="deliveries">
+        <div class="panel-header">
+          <h2>Deliveries</h2>
+          <div class="filters">
+            <select data-filter="sourceType">
+              <option value="">All sources</option>
+              <option value="hook">Hooks</option>
+              <option value="timer">Timers</option>
+            </select>
+            <button type="button" class="icon-button" data-action="refresh-deliveries" title="Refresh deliveries" aria-label="Refresh deliveries">
+              ↻
+            </button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Created</th>
+                <th>Source</th>
+                <th>Destination</th>
+                <th>Status</th>
+                <th>Response</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody data-list="deliveries"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <script src="/static/admin.js" type="module"></script>
+    </main>
+  )
+}
 
 app.get('/api/destinations', async (c) => {
   const destinations = await listDiscordDestinations(c.env.DB)
